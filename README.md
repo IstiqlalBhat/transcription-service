@@ -21,7 +21,7 @@ Your Apps ──> Gateway (FastAPI) ──> RunPod Worker (4 ASR Models)
 **Two-phase transcription:**
 
 1. **Fast** -- Parakeet TDT runs alone and returns a transcription in ~3 seconds
-2. **Judged** -- All 4 models run, outputs are sent to Claude Haiku which picks/merges the best transcription and replaces the fast result
+2. **Judged** -- All 4 models run, outputs are sent to Claude Sonnet 4.6 which uses a structured judging methodology (alignment, majority voting, proper noun detection) to produce the most accurate transcription
 
 ## Models
 
@@ -78,7 +78,7 @@ transcription-service/
 ├── gateway/                # FastAPI gateway (CPU)
 │   ├── main.py             # REST + WebSocket endpoints
 │   ├── auth.py             # API key validation
-│   ├── judge.py            # Claude Haiku judge
+│   ├── judge.py            # Claude Sonnet 4.6 judge
 │   ├── runpod_client.py    # RunPod serverless client
 │   ├── analytics.py        # Model performance tracking
 │   ├── config.py           # Pydantic settings
@@ -177,7 +177,7 @@ python -m pytest tests/ -v
 ## Tech Stack
 
 - **Python 3.11**, FastAPI, PyTorch 2.6, Transformers, NeMo Toolkit
-- **Claude Haiku 4.5** for LLM-as-a-judge
+- **Claude Sonnet 4.6** for LLM-as-a-judge (structured methodology: alignment, majority voting, proper noun detection)
 - **RunPod Serverless** for GPU inference
 - **Render** for gateway hosting
 - **Vercel** for frontend hosting
