@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: transcription-gateway
+    runtime: docker
+    dockerfilePath: ./gateway/Dockerfile
+    dockerContext: ./gateway
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_ENDPOINT_ID
+        sync: false
+      - key: API_KEYS
+        sync: false
