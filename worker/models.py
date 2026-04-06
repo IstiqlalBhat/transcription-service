@@ -131,7 +131,9 @@ def _transcribe_cohere(wav_bytes: bytes) -> str:
 
 
 def transcribe_all(wav_bytes: bytes) -> dict[str, str | None]:
-    """Run all 4 models and return their outputs. If a model fails, its value is None."""
+    """Run all 4 models in parallel and return their outputs. If a model fails, its value is None."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     models = {
         "whisper_large_v3": (_transcribe_whisper, _whisper_model),
         "parakeet_tdt": (_transcribe_parakeet, _parakeet_model),
@@ -140,15 +142,22 @@ def transcribe_all(wav_bytes: bytes) -> dict[str, str | None]:
     }
 
     results = {}
-    for name, (fn, model_ref) in models.items():
-        if model_ref is None:
-            logger.warning(f"Model {name} not loaded, skipping")
-            results[name] = None
-            continue
-        try:
-            results[name] = fn(wav_bytes)
-        except Exception as e:
-            logger.error(f"Model {name} failed: {e}")
-            results[name] = None
+    futures = {}
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        for name, (fn, model_ref) in models.items():
+            if model_ref is None:
+                logger.warning(f"Model {name} not loaded, skipping")
+                results[name] = None
+                continue
+            futures[executor.submit(fn, wav_bytes)] = name
+
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results[name] = future.result()
+            except Exception as e:
+                logger.error(f"Model {name} failed: {e}")
+                results[name] = None
 
     return results

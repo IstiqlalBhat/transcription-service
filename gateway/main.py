@@ -1,4 +1,6 @@
+import asyncio
 import logging
+from functools import partial
 
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException, WebSocket, WebSocketDisconnect, Query
 
@@ -80,9 +82,10 @@ async def websocket_transcribe(
             audio_bytes = await websocket.receive_bytes()
 
             try:
-                worker_result = send_audio_to_worker(audio_bytes)
+                loop = asyncio.get_event_loop()
+                worker_result = await loop.run_in_executor(None, send_audio_to_worker, audio_bytes)
                 model_outputs = worker_result["model_outputs"]
-                judge_result = judge_transcriptions(model_outputs)
+                judge_result = await loop.run_in_executor(None, judge_transcriptions, model_outputs)
 
                 tracker.record(judge_result.get("primary_model"))
 
