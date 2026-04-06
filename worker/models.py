@@ -22,34 +22,52 @@ def load_models():
 
     import torch
     from transformers import WhisperProcessor, WhisperForConditionalGeneration
-    import nemo.collections.asr as nemo_asr
 
-    logger.info("Loading Whisper Large v3...")
-    _whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
-    _whisper_model = WhisperForConditionalGeneration.from_pretrained(
-        "openai/whisper-large-v3"
-    ).to("cuda")
+    try:
+        logger.info("Loading Whisper Large v3...")
+        _whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
+        _whisper_model = WhisperForConditionalGeneration.from_pretrained(
+            "openai/whisper-large-v3"
+        ).to("cuda")
+        logger.info("Whisper Large v3 loaded.")
+    except Exception as e:
+        logger.error(f"Failed to load Whisper Large v3: {e}")
 
-    logger.info("Loading Parakeet TDT 0.6b v2...")
-    _parakeet_model = nemo_asr.models.ASRModel.from_pretrained(
-        "nvidia/parakeet-tdt-0.6b-v2"
-    )
-    _parakeet_model = _parakeet_model.to("cuda")
+    try:
+        import nemo.collections.asr as nemo_asr
+        logger.info("Loading Parakeet TDT 0.6b v2...")
+        _parakeet_model = nemo_asr.models.ASRModel.from_pretrained(
+            "nvidia/parakeet-tdt-0.6b-v2"
+        )
+        _parakeet_model = _parakeet_model.to("cuda")
+        logger.info("Parakeet TDT loaded.")
+    except Exception as e:
+        logger.error(f"Failed to load Parakeet TDT: {e}")
 
-    logger.info("Loading Canary Qwen 2.5b...")
-    _canary_model = nemo_asr.models.ASRModel.from_pretrained(
-        "nvidia/canary-qwen-2.5b"
-    )
-    _canary_model = _canary_model.to("cuda")
+    try:
+        import nemo.collections.asr as nemo_asr
+        logger.info("Loading Canary Qwen 2.5b...")
+        _canary_model = nemo_asr.models.ASRModel.from_pretrained(
+            "nvidia/canary-qwen-2.5b"
+        )
+        _canary_model = _canary_model.to("cuda")
+        logger.info("Canary Qwen loaded.")
+    except Exception as e:
+        logger.error(f"Failed to load Canary Qwen: {e}")
 
-    logger.info("Loading Cohere Transcribe...")
-    from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
-    _cohere_processor = AutoProcessor.from_pretrained("cohere-transcribe-03-2026")
-    _cohere_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        "cohere-transcribe-03-2026"
-    ).to("cuda")
+    try:
+        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+        logger.info("Loading Cohere Transcribe...")
+        _cohere_processor = AutoProcessor.from_pretrained("CohereLabs/cohere-transcribe-03-2026")
+        _cohere_model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            "CohereLabs/cohere-transcribe-03-2026"
+        ).to("cuda")
+        logger.info("Cohere Transcribe loaded.")
+    except Exception as e:
+        logger.error(f"Failed to load Cohere Transcribe: {e}")
 
-    logger.info("All models loaded.")
+    loaded = sum(1 for m in [_whisper_model, _parakeet_model, _canary_model, _cohere_model] if m is not None)
+    logger.info(f"Model loading complete: {loaded}/4 models loaded.")
 
 
 def _wav_bytes_to_array(wav_bytes: bytes):
