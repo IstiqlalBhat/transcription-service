@@ -15,12 +15,28 @@ _cohere_processor = None
 
 
 def load_models():
-    """Load all 4 ASR models into VRAM. Called once on worker cold start."""
+    """Load ASR models into VRAM. Called once on worker cold start.
+
+    Parakeet loads first (used for fast transcription).
+    Other models load after (used for background ensemble judging).
+    """
     global _whisper_model, _whisper_processor
     global _parakeet_model, _canary_model
     global _cohere_model, _cohere_processor
 
     import torch
+
+    # Parakeet first — it's the fast path
+    try:
+        import nemo.collections.asr as nemo_asr
+        logger.info("Loading Parakeet TDT 0.6b v2...")
+        _parakeet_model = nemo_asr.models.ASRModel.from_pretrained(
+            "nvidia/parakeet-tdt-0.6b-v2"
+        )
+        _parakeet_model = _parakeet_model.to("cuda")
+        logger.info("Parakeet TDT loaded.")
+    except Exception as e:
+        logger.error(f"Failed to load Parakeet TDT: {e}")
 
     try:
         from transformers import WhisperProcessor, WhisperForConditionalGeneration
@@ -32,17 +48,6 @@ def load_models():
         logger.info("Whisper Large v3 loaded.")
     except Exception as e:
         logger.error(f"Failed to load Whisper Large v3: {e}")
-
-    try:
-        import nemo.collections.asr as nemo_asr
-        logger.info("Loading Parakeet TDT 0.6b v2...")
-        _parakeet_model = nemo_asr.models.ASRModel.from_pretrained(
-            "nvidia/parakeet-tdt-0.6b-v2"
-        )
-        _parakeet_model = _parakeet_model.to("cuda")
-        logger.info("Parakeet TDT loaded.")
-    except Exception as e:
-        logger.error(f"Failed to load Parakeet TDT: {e}")
 
     try:
         from nemo.collections.speechlm2.models import SALM

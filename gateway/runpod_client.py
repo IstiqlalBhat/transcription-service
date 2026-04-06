@@ -11,8 +11,13 @@ from gateway.config import settings
 logger = logging.getLogger(__name__)
 
 
-def send_audio_to_worker(audio_bytes: bytes) -> dict:
-    """Send audio to RunPod serverless worker, return model outputs."""
+def send_audio_to_worker(audio_bytes: bytes, mode: str = "fast") -> dict:
+    """Send audio to RunPod serverless worker.
+
+    Args:
+        audio_bytes: Raw audio bytes
+        mode: "fast" for Parakeet only, "full" for all 4 models
+    """
     if runpod is None:
         raise RuntimeError("runpod module not installed")
 
@@ -23,7 +28,7 @@ def send_audio_to_worker(audio_bytes: bytes) -> dict:
 
     try:
         run = endpoint.run_sync(
-            request_input={"audio": audio_b64},
+            request_input={"audio": audio_b64, "mode": mode},
             timeout=120,
         )
 

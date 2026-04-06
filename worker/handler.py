@@ -2,15 +2,21 @@ import base64
 import logging
 
 from audio_utils import normalize_audio
-from models import load_models, transcribe_all
+from models import load_models, transcribe_all, _transcribe_parakeet, _parakeet_model
 
 logger = logging.getLogger(__name__)
 
 
 def handler(event: dict) -> dict:
-    """RunPod serverless handler. Receives base64 audio, returns 4 transcriptions."""
+    """RunPod serverless handler.
+
+    Supports two modes via input.mode:
+    - "fast" (default): Run Parakeet only for instant transcription (~2-3s)
+    - "full": Run all 4 models for ensemble judging (~15-30s)
+    """
     input_data = event.get("input", {})
     audio_b64 = input_data.get("audio")
+    mode = input_data.get("mode", "fast")
 
     if not audio_b64:
         return {"error": "Missing 'audio' field in input. Send base64-encoded audio."}
@@ -25,19 +31,35 @@ def handler(event: dict) -> dict:
     except Exception as e:
         return {"error": f"Audio normalization failed: {e}"}
 
-    model_outputs = transcribe_all(wav_bytes)
-
-    succeeded = sum(1 for v in model_outputs.values() if v is not None)
-
-    return {
-        "model_outputs": model_outputs,
-        "models_succeeded": succeeded,
-    }
+    if mode == "fast":
+        # Fast path: Parakeet only
+        if _parakeet_model is None:
+            return {"error": "Parakeet model not loaded"}
+        try:
+            text = _transcribe_parakeet(wav_bytes)
+            return {
+                "mode": "fast",
+                "transcription": text,
+                "model_outputs": {"parakeet_tdt": text},
+                "models_succeeded": 1,
+            }
+        except Exception as e:
+            logger.error(f"Parakeet failed: {e}")
+            return {"error": f"Transcription failed: {e}"}
+    else:
+        # Full path: all 4 models
+        model_outputs = transcribe_all(wav_bytes)
+        succeeded = sum(1 for v in model_outputs.values() if v is not None)
+        return {
+            "mode": "full",
+            "model_outputs": model_outputs,
+            "models_succeeded": succeeded,
+        }
 
 
 # RunPod entrypoint — loads models on cold start, then serves requests
 if __name__ == "__main__":
-    import runpod  # noqa: F401 — only needed at runtime, not imported at module level
+    import runpod
 
     load_models()
     runpod.serverless.start({"handler": handler})

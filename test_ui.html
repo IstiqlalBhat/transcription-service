@@ -218,12 +218,12 @@ function addPending() {
 
 function addTranscript(data) {
   const box = document.getElementById('transcripts');
-  if (pendingTimer) { clearInterval(pendingTimer); pendingTimer = null; }
-  const pending = box.querySelector('.pending-entry');
-  if (pending) pending.remove();
-  if (box.querySelector('.empty-state')) box.innerHTML = '';
 
   if (data.error) {
+    if (pendingTimer) { clearInterval(pendingTimer); pendingTimer = null; }
+    const pending = box.querySelector('.pending-entry');
+    if (pending) pending.remove();
+    if (box.querySelector('.empty-state')) box.innerHTML = '';
     const div = document.createElement('div');
     div.className = 'transcript-entry';
     div.innerHTML = '<div class="transcript-text" style="color:#ef4444;">Error: ' + data.error + '</div>';
@@ -231,28 +231,62 @@ function addTranscript(data) {
     return;
   }
 
-  const conf = data.confidence || 'medium';
+  const phase = data.phase || 'fast';
   const models = data.model_outputs || {};
   const time = new Date().toLocaleTimeString();
 
-  let modelsHtml = '';
-  for (const [name, text] of Object.entries(models)) {
-    const display = text || '(failed)';
-    modelsHtml += '<div class="model-output"><span>' + name + ':</span> ' + display + '</div>';
-  }
+  if (phase === 'fast') {
+    // Phase 1: instant result from Parakeet
+    if (pendingTimer) { clearInterval(pendingTimer); pendingTimer = null; }
+    const pending = box.querySelector('.pending-entry');
+    if (pending) pending.remove();
+    if (box.querySelector('.empty-state')) box.innerHTML = '';
 
-  const div = document.createElement('div');
-  div.className = 'transcript-entry';
-  div.innerHTML = `
-    <div class="transcript-text">${data.transcription}</div>
-    <div class="transcript-meta">
-      <span class="confidence-${conf}">${conf} confidence</span>
-      <span>${time}</span>
-    </div>
-    <div class="toggle-models" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">show model outputs</div>
-    <div class="model-outputs" style="display:none">${modelsHtml}</div>
-  `;
-  box.prepend(div);
+    const div = document.createElement('div');
+    div.className = 'transcript-entry fast-entry';
+    div.setAttribute('data-time', time);
+    div.innerHTML = `
+      <div class="transcript-text">${data.transcription}</div>
+      <div class="transcript-meta">
+        <span style="color:#3b82f6;">instant (Parakeet)</span>
+        <span>${time}</span>
+        <span style="color:#888; font-style:italic;">judging...</span>
+      </div>
+    `;
+    box.prepend(div);
+  } else if (phase === 'judged') {
+    // Phase 2: replace with judged result
+    const conf = data.confidence || 'medium';
+    const fastEntry = box.querySelector('.fast-entry');
+
+    let modelsHtml = '';
+    for (const [name, text] of Object.entries(models)) {
+      const display = text || '(failed)';
+      modelsHtml += '<div class="model-output"><span>' + name + ':</span> ' + display + '</div>';
+    }
+
+    const html = `
+      <div class="transcript-text">${data.transcription}</div>
+      <div class="transcript-meta">
+        <span class="confidence-${conf}">${conf} confidence</span>
+        <span>${time}</span>
+        <span style="color:#22c55e;">judged</span>
+      </div>
+      <div class="toggle-models" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none'">show model outputs</div>
+      <div class="model-outputs" style="display:none">${modelsHtml}</div>
+    `;
+
+    if (fastEntry) {
+      fastEntry.className = 'transcript-entry';
+      fastEntry.innerHTML = html;
+    } else {
+      if (box.querySelector('.empty-state')) box.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'transcript-entry';
+      div.innerHTML = html;
+      box.prepend(div);
+    }
+  }
 }
 </script>
 </body>
