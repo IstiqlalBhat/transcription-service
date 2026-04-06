@@ -2,7 +2,7 @@ import base64
 import logging
 
 from audio_utils import normalize_audio
-from models import load_models, transcribe_all, _transcribe_parakeet, _parakeet_model
+import models as models_module
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +32,10 @@ def handler(event: dict) -> dict:
         return {"error": f"Audio normalization failed: {e}"}
 
     if mode == "fast":
-        # Fast path: Parakeet only
-        if _parakeet_model is None:
+        if models_module._parakeet_model is None:
             return {"error": "Parakeet model not loaded"}
         try:
-            text = _transcribe_parakeet(wav_bytes)
+            text = models_module._transcribe_parakeet(wav_bytes)
             return {
                 "mode": "fast",
                 "transcription": text,
@@ -44,11 +43,9 @@ def handler(event: dict) -> dict:
                 "models_succeeded": 1,
             }
         except Exception as e:
-            logger.error(f"Parakeet failed: {e}")
             return {"error": f"Transcription failed: {e}"}
     else:
-        # Full path: all 4 models
-        model_outputs = transcribe_all(wav_bytes)
+        model_outputs = models_module.transcribe_all(wav_bytes)
         succeeded = sum(1 for v in model_outputs.values() if v is not None)
         return {
             "mode": "full",
@@ -57,9 +54,8 @@ def handler(event: dict) -> dict:
         }
 
 
-# RunPod entrypoint — loads models on cold start, then serves requests
 if __name__ == "__main__":
     import runpod
 
-    load_models()
+    models_module.load_models()
     runpod.serverless.start({"handler": handler})
