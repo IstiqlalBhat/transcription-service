@@ -127,7 +127,10 @@ def _transcribe_cohere(wav_bytes: bytes) -> str:
     inputs = inputs.to(_cohere_model.device, dtype=_cohere_model.dtype)
 
     outputs = _cohere_model.generate(**inputs, max_new_tokens=256)
-    return _cohere_processor.decode(outputs, skip_special_tokens=True).strip()
+    decoded = _cohere_processor.decode(outputs, skip_special_tokens=True)
+    if isinstance(decoded, list):
+        return decoded[0].strip() if decoded else ""
+    return decoded.strip()
 
 
 def transcribe_all(wav_bytes: bytes) -> dict[str, str | None]:
