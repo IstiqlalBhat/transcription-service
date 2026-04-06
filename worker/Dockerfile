@@ -16,7 +16,8 @@ RUN ln -sf /usr/bin/python3.11 /usr/bin/python
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir numpy==1.26.0 && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
