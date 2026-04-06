@@ -21,9 +21,9 @@ def load_models():
     global _cohere_model, _cohere_processor
 
     import torch
-    from transformers import WhisperProcessor, WhisperForConditionalGeneration
 
     try:
+        from transformers import WhisperProcessor, WhisperForConditionalGeneration
         logger.info("Loading Whisper Large v3...")
         _whisper_processor = WhisperProcessor.from_pretrained("openai/whisper-large-v3")
         _whisper_model = WhisperForConditionalGeneration.from_pretrained(
@@ -45,23 +45,21 @@ def load_models():
         logger.error(f"Failed to load Parakeet TDT: {e}")
 
     try:
-        import nemo.collections.asr as nemo_asr
+        from nemo.collections.speechlm2.models import SALM
         logger.info("Loading Canary Qwen 2.5b...")
-        _canary_model = nemo_asr.models.ASRModel.from_pretrained(
-            "nvidia/canary-qwen-2.5b"
-        )
-        _canary_model = _canary_model.to("cuda")
+        _canary_model = SALM.from_pretrained("nvidia/canary-qwen-2.5b")
         logger.info("Canary Qwen loaded.")
     except Exception as e:
         logger.error(f"Failed to load Canary Qwen: {e}")
 
     try:
-        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+        from transformers import AutoProcessor, CohereAsrForConditionalGeneration
         logger.info("Loading Cohere Transcribe...")
         _cohere_processor = AutoProcessor.from_pretrained("CohereLabs/cohere-transcribe-03-2026")
-        _cohere_model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            "CohereLabs/cohere-transcribe-03-2026"
-        ).to("cuda")
+        _cohere_model = CohereAsrForConditionalGeneration.from_pretrained(
+            "CohereLabs/cohere-transcribe-03-2026",
+            device_map="auto",
+        )
         logger.info("Cohere Transcribe loaded.")
     except Exception as e:
         logger.error(f"Failed to load Cohere Transcribe: {e}")
@@ -72,9 +70,7 @@ def load_models():
 
 def _wav_bytes_to_array(wav_bytes: bytes):
     """Convert WAV bytes (16kHz mono) to float32 numpy array."""
-    import numpy as np  # noqa: F401 — imported for type usage by callers
     import soundfile as sf
-
     audio_array, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
     return audio_array
 
@@ -99,7 +95,7 @@ def _transcribe_parakeet(wav_bytes: bytes) -> str:
         f.flush()
         try:
             results = _parakeet_model.transcribe([f.name])
-            return results[0].strip() if isinstance(results[0], str) else results[0].text.strip()
+            return results[0].text.strip() if hasattr(results[0], 'text') else str(results[0]).strip()
         finally:
             os.unlink(f.name)
 
@@ -109,37 +105,45 @@ def _transcribe_canary(wav_bytes: bytes) -> str:
         f.write(wav_bytes)
         f.flush()
         try:
-            results = _canary_model.transcribe([f.name])
-            return results[0].strip() if isinstance(results[0], str) else results[0].text.strip()
+            answer_ids = _canary_model.generate(
+                prompts=[
+                    [{"role": "user", "content": f"Transcribe the following: {_canary_model.audio_locator_tag}", "audio": [f.name]}]
+                ],
+                max_new_tokens=256,
+            )
+            return _canary_model.tokenizer.ids_to_text(answer_ids[0].cpu()).strip()
         finally:
             os.unlink(f.name)
 
 
 def _transcribe_cohere(wav_bytes: bytes) -> str:
-    import torch
+    from transformers.audio_utils import load_audio
 
     audio = _wav_bytes_to_array(wav_bytes)
     inputs = _cohere_processor(
-        audio, sampling_rate=16000, return_tensors="pt"
-    ).to("cuda")
-    with torch.no_grad():
-        predicted_ids = _cohere_model.generate(**inputs)
-    return _cohere_processor.batch_decode(
-        predicted_ids, skip_special_tokens=True
-    )[0].strip()
+        audio, sampling_rate=16000, return_tensors="pt", language="en"
+    )
+    inputs = inputs.to(_cohere_model.device, dtype=_cohere_model.dtype)
+
+    outputs = _cohere_model.generate(**inputs, max_new_tokens=256)
+    return _cohere_processor.decode(outputs, skip_special_tokens=True).strip()
 
 
 def transcribe_all(wav_bytes: bytes) -> dict[str, str | None]:
     """Run all 4 models and return their outputs. If a model fails, its value is None."""
     models = {
-        "whisper_large_v3": _transcribe_whisper,
-        "parakeet_tdt": _transcribe_parakeet,
-        "canary_qwen": _transcribe_canary,
-        "cohere_transcribe": _transcribe_cohere,
+        "whisper_large_v3": (_transcribe_whisper, _whisper_model),
+        "parakeet_tdt": (_transcribe_parakeet, _parakeet_model),
+        "canary_qwen": (_transcribe_canary, _canary_model),
+        "cohere_transcribe": (_transcribe_cohere, _cohere_model),
     }
 
     results = {}
-    for name, fn in models.items():
+    for name, (fn, model_ref) in models.items():
+        if model_ref is None:
+            logger.warning(f"Model {name} not loaded, skipping")
+            results[name] = None
+            continue
         try:
             results[name] = fn(wav_bytes)
         except Exception as e:
