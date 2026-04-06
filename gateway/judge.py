@@ -104,7 +104,7 @@ def judge_transcriptions(model_outputs: dict[str, str | None]) -> dict:
         prompt = _build_judge_prompt(model_outputs)
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6-20250514",
             max_tokens=1024,
             system=JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
