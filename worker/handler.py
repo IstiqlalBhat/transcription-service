@@ -1,8 +1,8 @@
 import base64
 import logging
 
-from worker.audio_utils import normalize_audio
-from worker.models import load_models, transcribe_all
+from audio_utils import normalize_audio
+from models import load_models, transcribe_all
 
 logger = logging.getLogger(__name__)
 
