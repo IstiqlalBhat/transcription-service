@@ -14,34 +14,68 @@ MODEL_DISPLAY_NAMES = {
     "cohere_transcribe": "Cohere Transcribe",
 }
 
-# Fallback priority — best model first
 FALLBACK_ORDER = ["parakeet_tdt", "canary_qwen", "cohere_transcribe", "whisper_large_v3"]
+
+JUDGE_SYSTEM_PROMPT = """You are an expert transcription judge. You receive multiple transcriptions of the same audio from different ASR models. Your job is to produce the single most accurate transcription.
+
+## Judging Methodology
+
+### Step 1: Alignment
+Align the transcriptions word by word. Identify where they agree and where they diverge.
+
+### Step 2: Majority Voting
+For each segment where models disagree, use majority voting. If 3 out of 4 models agree on a word or phrase, that's almost certainly correct.
+
+### Step 3: Proper Nouns and Technical Terms
+ASR models often fail on proper nouns, brand names, and technical terms (e.g., "OpenAI" transcribed as "open eye" or "opening I"). When one model produces a recognizable proper noun or technical term and others produce phonetically similar but incorrect text, trust the proper noun version. Examples:
+- "opening I Whisper" vs "OpenAI Whisper" → "OpenAI Whisper"
+- "pie torch" vs "PyTorch" → "PyTorch"
+- "hugging face" vs "Hugging Face" → "Hugging Face"
+
+### Step 4: Grammar and Punctuation
+- Add proper capitalization and punctuation
+- Fix obvious grammatical errors only if the correct form is supported by at least one model's output
+- Do NOT add words that no model produced
+- Do NOT rephrase or paraphrase — preserve the speaker's exact words
+
+### Step 5: Confidence Assessment
+- **high**: All models produce substantially the same output (minor punctuation/capitalization differences only)
+- **medium**: Models agree on the core content but differ on 1-2 words or phrases
+- **low**: Major disagreements — models produced significantly different text
+
+## Rules
+- NEVER hallucinate words that appear in zero model outputs
+- NEVER correct grammar beyond what the models themselves suggest
+- When in doubt, prefer the output from the model that has the most complete, grammatically coherent sentence
+- Proper nouns always win over phonetic approximations"""
 
 
 def _build_judge_prompt(model_outputs: dict[str, str | None]) -> str:
     lines = []
     for key, display_name in MODEL_DISPLAY_NAMES.items():
         if model_outputs.get(key) is not None:
-            lines.append(f"- {display_name} ({key}): \"{model_outputs[key]}\"")
+            lines.append(f"**{display_name}** (`{key}`): \"{model_outputs[key]}\"")
 
     outputs_block = "\n".join(lines)
 
-    return f"""You are a transcription judge. You received transcriptions of the same audio from different ASR models. Your job:
+    return f"""Here are the transcriptions from {len(lines)} ASR models for the same audio:
 
-1. Compare all outputs
-2. Identify the most accurate transcription, or merge the best parts from each
-3. Fix obvious errors (grammar, missing words) that you can infer from cross-referencing the outputs
-4. Identify which model was most accurate (primary_model) using the model key in parentheses
-5. Rate confidence: "high" if models mostly agree, "medium" if some diverge, "low" if major disagreement
+{outputs_block}
 
-Respond with ONLY valid JSON: {{"transcription": "final text", "confidence": "high|medium|low", "primary_model": "model_key"}}
+Analyze these step by step using the methodology, then respond with ONLY this JSON:
 
-Model outputs:
-{outputs_block}"""
+```json
+{{
+  "reasoning": "Brief explanation of your judging decisions (1-2 sentences)",
+  "transcription": "The final corrected transcription",
+  "confidence": "high|medium|low",
+  "primary_model": "model_key of the model whose output was closest to your final answer"
+}}
+```"""
 
 
 def judge_transcriptions(model_outputs: dict[str, str | None]) -> dict:
-    """Send model outputs to Claude Haiku for judging. Returns dict with transcription, confidence, and primary_model."""
+    """Send model outputs to Claude Sonnet for judging."""
     available = {k: v for k, v in model_outputs.items() if v is not None}
 
     if len(available) == 0:
@@ -52,18 +86,50 @@ def judge_transcriptions(model_outputs: dict[str, str | None]) -> dict:
         only_text = available[only_key]
         return {"transcription": only_text, "confidence": "low", "primary_model": only_key}
 
+    # If all models agree (exact or near-exact), skip the API call
+    texts = list(available.values())
+    normalized = [t.strip().lower().rstrip('.!?') for t in texts]
+    if len(set(normalized)) == 1:
+        best_key = next(iter(available.keys()))
+        # Return the version with best punctuation (longest = most punctuation)
+        best_key = max(available, key=lambda k: len(available[k]))
+        return {
+            "transcription": available[best_key],
+            "confidence": "high",
+            "primary_model": best_key,
+        }
+
     try:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         prompt = _build_judge_prompt(model_outputs)
 
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            system=JUDGE_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
 
         raw = response.content[0].text.strip()
-        result = json.loads(raw)
+
+        # Extract JSON from response — Claude may include reasoning text before the JSON block
+        json_str = None
+        if "```json" in raw:
+            json_str = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in raw:
+            json_str = raw.split("```", 1)[1].split("```", 1)[0].strip()
+        elif "{" in raw:
+            # Find the JSON object directly
+            start = raw.index("{")
+            end = raw.rindex("}") + 1
+            json_str = raw[start:end]
+        else:
+            json_str = raw
+
+        result = json.loads(json_str)
+
+        logger.info(f"Judge reasoning: {result.get('reasoning', 'none')}")
+
         return {
             "transcription": result["transcription"],
             "confidence": result.get("confidence", "medium"),
@@ -72,7 +138,6 @@ def judge_transcriptions(model_outputs: dict[str, str | None]) -> dict:
 
     except Exception as e:
         logger.error(f"Claude judge failed: {e}")
-        # Fallback to best available model
         for model_key in FALLBACK_ORDER:
             if model_outputs.get(model_key) is not None:
                 return {
