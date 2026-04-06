@@ -81,7 +81,8 @@ def _transcribe_whisper(wav_bytes: bytes) -> str:
     audio = _wav_bytes_to_array(wav_bytes)
     inputs = _whisper_processor(
         audio, sampling_rate=16000, return_tensors="pt"
-    ).to("cuda")
+    )
+    inputs = inputs.to(device=_whisper_model.device, dtype=_whisper_model.dtype)
     with torch.no_grad():
         predicted_ids = _whisper_model.generate(**inputs)
     return _whisper_processor.batch_decode(
